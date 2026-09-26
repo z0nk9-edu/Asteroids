@@ -23,7 +23,7 @@ async def main():
         screen.blit(text_surface, text_rect)
 
     # Wait for user input on the screen
-    def yes_no_choice(message):
+    async def yes_no_choice(message):
         choice = None
         while choice is None:
             for event in pygame.event.get():
@@ -40,11 +40,12 @@ async def main():
             display_message(message + " (Y/N)")
             pygame.display.flip()
             clock.tick(30)
+            await asyncio.sleep(0)
         return choice
 
 
-    mouse_aim = yes_no_choice("Do you want to use mouse aiming?")
-    auto_aim = not mouse_aim and yes_no_choice("Do you want to use auto aiming?")
+    mouse_aim = await yes_no_choice("Do you want to use mouse aiming?")
+    auto_aim = not mouse_aim and await yes_no_choice("Do you want to use auto aiming?")
 
     last_action_time = 0
     asteroids = []
@@ -132,15 +133,16 @@ async def main():
             ship_vel += pygame.math.Vector2(math.cos(ship_rads), math.sin(ship_rads)) * 0.3
         if keys[pygame.K_SPACE] and current_time - last_action_time >= COOLDOWN_TIME and not mouse_aim:
             if auto_aim and asteroids:
-                asteroid = min(asteroids, key=lambda rock: (rock.pos - ship_pos).length())
-                asteroid_projection = asteroid.pos
-                relative_vel = asteroid.vel - ship_vel
-                for _ in range(5):
-                    time_to_intercept = (ship_pos - asteroid_projection).length() / PROJECTILE_VELOCITY
-                    asteroid_projection = asteroid.pos + relative_vel * time_to_intercept
-                aim_vec = asteroid_projection - ship_pos
+                projections = []
+                for asteroid in asteroids:
+                    asteroid_projection = asteroid.pos
+                    relative_vel = asteroid.vel - ship_vel
+                    for _ in range(5):
+                        time_to_intercept = (ship_pos - asteroid_projection).length() / PROJECTILE_VELOCITY
+                        asteroid_projection = asteroid.pos + relative_vel * time_to_intercept
+                    projections.append(asteroid_projection)
+                aim_vec = min(projections, key=lambda p: (p - ship_pos).length()) - ship_pos
                 Projectile(math.radians(aim_vec.as_polar()[1]), *ship_pos, ship_vel)
-                last_action_time = current_time
             else: 
                 Projectile(ship_rads, *ship_pos, ship_vel)  
             last_action_time = current_time
