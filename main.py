@@ -47,7 +47,10 @@ async def main():
     mouse_aim = await yes_no_choice("Do you want to use mouse aiming?")
     auto_aim = not mouse_aim and await yes_no_choice("Do you want to use auto aiming?")
 
+    center = pygame.math.Vector2(WIDTH / 2, HEIGHT / 2)
+
     last_action_time = 0
+    global asteroids, spawns
     asteroids = []
     spawns = 2
 
@@ -70,6 +73,39 @@ async def main():
             if self.r > 8:
                 Asteroid(self.r / 2, *self.pos)
                 Asteroid(self.r / 2, *self.pos)
+
+    enemies = []
+
+    class Enemy:
+        def __init__(self, pos: pygame.math.Vector2, angle_rads: float) -> Enemy:
+            self.pos = pos
+            self.vel = pygame.math.Vector2(0, 0)
+            self.angle_rads = angle_rads
+            self.state = "patrol"
+
+        def move(self):
+            dist = (self.pos - ship_pos).length()
+            dot = self.pos.dot(ship_pos)
+            self.pos += self.vel
+            if dist < 100 and dot < 0.7:
+                self.state = "attack"
+            match self.state:
+                case "patrol":
+                    self.angle_rads += 0.02
+                # case "attack":
+
+        def draw(self):
+            pygame.draw.polygon(
+                screen,
+                (255, 0, 0),
+                [
+                    self.pos + pygame.math.Vector2(15, 0).rotate_rad(self.angle_rads),
+                    self.pos
+                    + pygame.math.Vector2(10, 0).rotate_rad(self.angle_rads + 2.5),
+                    self.pos
+                    + pygame.math.Vector2(10, 0).rotate_rad(self.angle_rads - 2.5),
+                ],
+            )
 
     projectiles = []
     PROJECTILE_VELOCITY = 4
@@ -94,16 +130,42 @@ async def main():
         def draw(self):
             pygame.draw.rect(screen, (255, 255, 255), self.rect)
 
+    global ship_pos, ship_vel
     ship_vel = pygame.math.Vector2(0, 0)
     ship_rads = math.pi / 2
-    ship_pos = pygame.math.Vector2(WIDTH / 2, HEIGHT / 2)
+    ship_pos = center.copy()
 
     COOLDOWN_TIME = 300
-
+    global running
     running = True
+
+    async def reset():
+        global running, asteroids, ship_vel, ship_pos, spawns
+        running = await yes_no_choice("Do you want to retry?")
+        asteroids.clear()
+        projectiles.clear()
+        enemies.clear()
+        ship_vel = pygame.math.Vector2(0, 0)
+        ship_pos = center.copy()
+        spawns = 2
+        for _ in range(spawns):
+            Asteroid(32, random.randint(0, WIDTH), random.randint(0, HEIGHT))
+        enemy_locs = [
+            pygame.math.Vector2(50, 50),
+            pygame.math.Vector2(WIDTH - 50, HEIGHT - 50),
+        ]
+        for pos in enemy_locs:
+            enemies.append(Enemy(pos, math.radians((pos - center).as_polar()[1])))
 
     for _ in range(spawns):
         Asteroid(32, random.randint(0, WIDTH), random.randint(0, HEIGHT))
+
+    enemy_locs = [
+        pygame.math.Vector2(50, 50),
+        pygame.math.Vector2(WIDTH - 50, HEIGHT - 50),
+    ]
+    for pos in enemy_locs:
+        enemies.append(Enemy(pos, math.radians((pos - center).as_polar()[1])))
 
     while running:
         for event in pygame.event.get():
@@ -115,7 +177,7 @@ async def main():
                     * math.pi
                     / 180,
                     *ship_pos,
-                    ship_vel
+                    ship_vel,
                 )
 
         if mouse_aim:
@@ -129,6 +191,8 @@ async def main():
             asteroid.move()
         for projectile in projectiles:
             projectile.move()
+        for enemy in enemies:
+            enemy.move()
 
         keys = pygame.key.get_pressed()
         current_time = pygame.time.get_ticks()
@@ -175,11 +239,14 @@ async def main():
         ship_pos += ship_vel
         ship_pos.x %= WIDTH
         ship_pos.y %= HEIGHT
-        ship_vel *= 0.97
+        ship_vel *= 0.99
 
         for asteroid in asteroids:
             if asteroid.pos.distance_to(ship_pos) < asteroid.r + 10:
-                running = False
+                await reset()
+        for enemy in enemies:
+            if enemy.pos.distance_to(ship_pos) < 20:
+                await reset()
         for projectile in projectiles:
             for asteroid in asteroids:
                 if asteroid.pos.distance_to(projectile.pos) < asteroid.r + 2.5:
@@ -194,6 +261,8 @@ async def main():
             asteroid.draw()
         for projectile in projectiles:
             projectile.draw()
+        for enemy in enemies:
+            enemy.draw()
         pygame.draw.polygon(
             screen,
             (255, 255, 255),
