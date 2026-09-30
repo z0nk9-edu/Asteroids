@@ -9,6 +9,9 @@ pygame.init()
 WIDTH = 1000
 HEIGHT = 800
 
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("asteroids")
 clock = pygame.time.Clock()
@@ -19,7 +22,7 @@ async def main():
 
     # Function to display a message on the screen
     def display_message(text, y_offset=0):
-        text_surface = font.render(text, True, (255, 255, 255))
+        text_surface = font.render(text, True, WHITE)
         text_rect = text_surface.get_rect(center=(WIDTH // 2, HEIGHT // 2 + y_offset))
         screen.blit(text_surface, text_rect)
 
@@ -37,7 +40,7 @@ async def main():
                     elif event.key == pygame.K_n:
                         choice = False
 
-            screen.fill((0, 0, 0))
+            screen.fill(BLACK)
             display_message(message + " (Y/N)")
             pygame.display.flip()
             clock.tick(30)
@@ -51,13 +54,30 @@ async def main():
 
     last_action_time = 0
     global asteroids, spawns
+
+    ASTEROID_SPAWN_RADIUS = 32
+    ASTEROID_SPEED_RANGE = 3
+    ASTEROID_MIN_SPLIT_RADIUS = 8
+    INITIAL_ASTEROID_SPAWNS = 2
+    DRAG = 0.97
+    SHIP_NOSE_LENGTH = 15
+    SHIP_WING_LENGTH = 10
+    SHIP_WING_ANGLE = 2.5
+    SHIP_TURN_SPEED = 0.1
+    ENEMY_TURN_RATE = 0.03
+    ENEMY_HIT_RADIUS = 20
+    ENEMY_SPAWN_OFFSET = 50
+
     asteroids = []
-    spawns = 2
+    spawns = INITIAL_ASTEROID_SPAWNS
 
     class Asteroid:
         def __init__(self, r, x, y):
             self.pos = pygame.math.Vector2(x, y)
-            self.vel = pygame.math.Vector2(random.uniform(-3, 3), random.uniform(-3, 3))
+            self.vel = pygame.math.Vector2(
+                random.uniform(-ASTEROID_SPEED_RANGE, ASTEROID_SPEED_RANGE),
+                random.uniform(-ASTEROID_SPEED_RANGE, ASTEROID_SPEED_RANGE),
+            )
             self.r = r
             asteroids.append(self)
 
@@ -70,7 +90,7 @@ async def main():
             self.pos.y %= HEIGHT + self.r * 2
 
         def destroy(self):
-            if self.r > 8:
+            if self.r > ASTEROID_MIN_SPLIT_RADIUS:
                 Asteroid(self.r / 2, *self.pos)
                 Asteroid(self.r / 2, *self.pos)
 
@@ -82,28 +102,68 @@ async def main():
             self.vel = pygame.math.Vector2(0, 0)
             self.angle_rads = angle_rads
             self.state = "patrol"
+            self.lost_player = False
+            self.omega = random.choice([-ENEMY_TURN_RATE, ENEMY_TURN_RATE])
+            self.attack_start = 0
+            enemies.append(self)
 
         def move(self):
-            dist = (self.pos - ship_pos).length()
-            dot = self.pos.dot(ship_pos)
+            to_ship = ship_pos - self.pos
+            dist = to_ship.length()
             self.pos += self.vel
-            if dist < 100 and dot < 0.7:
-                self.state = "attack"
+            self.vel *= DRAG
+            self.pos.x %= WIDTH
+            self.pos.y %= HEIGHT
+
+            target = math.atan2(to_ship.y, to_ship.x)
+            diff = (target - self.angle_rads + math.pi) % (2 * math.pi) - math.pi
+            now = pygame.time.get_ticks()
+
+            if dist < 500 and abs(diff) < 0.7:
+                if self.state != "attack":
+                    self.state = "attack"
+                    self.lost_player = True
+                    self.last_shot = now
+            else:
+                self.state = "patrol"
+
             match self.state:
                 case "patrol":
-                    self.angle_rads += 0.02
-                # case "attack":
+                    if self.lost_player:
+                        self.omega = random.choice([-ENEMY_TURN_RATE, ENEMY_TURN_RATE])
+                        self.lost_player = False
+                    self.angle_rads += self.omega
+                case "attack":
+                    self.angle_rads += max(
+                        -ENEMY_TURN_RATE, min(ENEMY_TURN_RATE, diff * 0.1)
+                    )
+                    self.vel += (
+                        pygame.math.Vector2(
+                            math.cos(self.angle_rads), math.sin(self.angle_rads)
+                        )
+                        * 0.2
+                    )
+                    if now - self.last_shot > 1000:
+                        Projectile(self.angle_rads, self.pos, self.vel, enemy_proj=True)
+                        self.last_shot = now
 
         def draw(self):
             pygame.draw.polygon(
                 screen,
                 (255, 0, 0),
                 [
-                    self.pos + pygame.math.Vector2(15, 0).rotate_rad(self.angle_rads),
                     self.pos
-                    + pygame.math.Vector2(10, 0).rotate_rad(self.angle_rads + 2.5),
+                    + pygame.math.Vector2(SHIP_NOSE_LENGTH, 0).rotate_rad(
+                        self.angle_rads
+                    ),
                     self.pos
-                    + pygame.math.Vector2(10, 0).rotate_rad(self.angle_rads - 2.5),
+                    + pygame.math.Vector2(SHIP_WING_LENGTH, 0).rotate_rad(
+                        self.angle_rads + SHIP_WING_ANGLE
+                    ),
+                    self.pos
+                    + pygame.math.Vector2(SHIP_WING_LENGTH, 0).rotate_rad(
+                        self.angle_rads - SHIP_WING_ANGLE
+                    ),
                 ],
             )
 
@@ -111,14 +171,15 @@ async def main():
     PROJECTILE_VELOCITY = 4
 
     class Projectile:
-        def __init__(self, angle_radians, x, y, ship_vel):
-            self.pos = pygame.math.Vector2(x, y)
+        def __init__(self, angle_radians, pos, ship_vel, enemy_proj=False):
+            self.pos = pos.copy()
             self.vel = (
                 pygame.math.Vector2(math.cos(angle_radians), math.sin(angle_radians))
                 * PROJECTILE_VELOCITY
                 + ship_vel
             )
-            self.rect = pygame.Rect(x, y, 5, 5)
+            self.rect = pygame.Rect(*pos, 5, 5)
+            self.enemy_proj = enemy_proj
             projectiles.append(self)
 
         def move(self):
@@ -128,7 +189,7 @@ async def main():
                 projectiles.remove(self)
 
         def draw(self):
-            pygame.draw.rect(screen, (255, 255, 255), self.rect)
+            pygame.draw.rect(screen, WHITE, self.rect)
 
     global ship_pos, ship_vel
     ship_vel = pygame.math.Vector2(0, 0)
@@ -147,25 +208,31 @@ async def main():
         enemies.clear()
         ship_vel = pygame.math.Vector2(0, 0)
         ship_pos = center.copy()
-        spawns = 2
+        spawns = INITIAL_ASTEROID_SPAWNS
         for _ in range(spawns):
-            Asteroid(32, random.randint(0, WIDTH), random.randint(0, HEIGHT))
+            Asteroid(
+                ASTEROID_SPAWN_RADIUS, random.randint(0, WIDTH), random.randint(0, HEIGHT)
+            )
         enemy_locs = [
-            pygame.math.Vector2(50, 50),
-            pygame.math.Vector2(WIDTH - 50, HEIGHT - 50),
+            pygame.math.Vector2(ENEMY_SPAWN_OFFSET, ENEMY_SPAWN_OFFSET),
+            pygame.math.Vector2(
+                WIDTH - ENEMY_SPAWN_OFFSET, HEIGHT - ENEMY_SPAWN_OFFSET
+            ),
         ]
         for pos in enemy_locs:
-            enemies.append(Enemy(pos, math.radians((pos - center).as_polar()[1])))
+            Enemy(pos, math.radians((pos - center).as_polar()[1]))
 
     for _ in range(spawns):
-        Asteroid(32, random.randint(0, WIDTH), random.randint(0, HEIGHT))
+        Asteroid(
+            ASTEROID_SPAWN_RADIUS, random.randint(0, WIDTH), random.randint(0, HEIGHT)
+        )
 
     enemy_locs = [
-        pygame.math.Vector2(50, 50),
-        pygame.math.Vector2(WIDTH - 50, HEIGHT - 50),
+        pygame.math.Vector2(ENEMY_SPAWN_OFFSET, ENEMY_SPAWN_OFFSET),
+        pygame.math.Vector2(WIDTH - ENEMY_SPAWN_OFFSET, HEIGHT - ENEMY_SPAWN_OFFSET),
     ]
     for pos in enemy_locs:
-        enemies.append(Enemy(pos, math.radians((pos - center).as_polar()[1])))
+        Enemy(pos, math.radians((pos - center).as_polar()[1]))
 
     while running:
         for event in pygame.event.get():
@@ -176,7 +243,7 @@ async def main():
                     (pygame.math.Vector2(event.pos) - ship_pos).as_polar()[1]
                     * math.pi
                     / 180,
-                    *ship_pos,
+                    ship_pos,
                     ship_vel,
                 )
 
@@ -198,9 +265,9 @@ async def main():
         current_time = pygame.time.get_ticks()
 
         if keys[pygame.K_LEFT]:
-            ship_rads -= 0.1
+            ship_rads -= SHIP_TURN_SPEED
         if keys[pygame.K_RIGHT]:
-            ship_rads += 0.1
+            ship_rads += SHIP_TURN_SPEED
         if keys[pygame.K_UP]:
             ship_vel += (
                 pygame.math.Vector2(math.cos(ship_rads), math.sin(ship_rads)) * 0.3
@@ -210,7 +277,7 @@ async def main():
             and current_time - last_action_time >= COOLDOWN_TIME
             and not mouse_aim
         ):
-            if auto_aim and asteroids:
+            if auto_aim:
                 projections = []
                 for asteroid in asteroids:
                     asteroid_projection = asteroid.pos
@@ -223,29 +290,44 @@ async def main():
                             asteroid.pos + relative_vel * time_to_intercept
                         )
                     projections.append(asteroid_projection)
+                for enemy in enemies:
+                    projections.append(enemy.pos)
                 aim_vec = (
                     min(projections, key=lambda p: (p - ship_pos).length()) - ship_pos
                 )
-                Projectile(math.radians(aim_vec.as_polar()[1]), *ship_pos, ship_vel)
+                Projectile(math.radians(aim_vec.as_polar()[1]), ship_pos, ship_vel)
             else:
-                Projectile(ship_rads, *ship_pos, ship_vel)
+                Projectile(ship_rads, ship_pos, ship_vel)
             last_action_time = current_time
 
-        if not asteroids:
-            for _ in range(spawns):
-                Asteroid(32, random.randint(0, WIDTH), random.randint(0, HEIGHT))
-                spawns += 1
+        if not asteroids and not enemies:
+            for i in range(spawns):
+                Asteroid(
+                    ASTEROID_SPAWN_RADIUS,
+                    random.randint(0, WIDTH),
+                    random.randint(0, HEIGHT),
+                )
+                if i >= len(enemy_locs):
+                    Enemy(
+                        pygame.math.Vector2(
+                            random.randrange(WIDTH), random.randrange(HEIGHT)
+                        ),
+                        random.random() * math.pi * 2,
+                    )
+                else:
+                    Enemy(enemy_locs[i], math.radians((pos - center).as_polar()[1]))
+            spawns += 1
 
         ship_pos += ship_vel
         ship_pos.x %= WIDTH
         ship_pos.y %= HEIGHT
-        ship_vel *= 0.99
+        ship_vel *= DRAG
 
         for asteroid in asteroids:
             if asteroid.pos.distance_to(ship_pos) < asteroid.r + 10:
                 await reset()
         for enemy in enemies:
-            if enemy.pos.distance_to(ship_pos) < 20:
+            if enemy.pos.distance_to(ship_pos) < ENEMY_HIT_RADIUS:
                 await reset()
         for projectile in projectiles:
             for asteroid in asteroids:
@@ -254,9 +336,18 @@ async def main():
                     asteroids.remove(asteroid)
                     projectiles.remove(projectile)
                     break
+            for enemy in enemies:
+                if (
+                    not projectile.enemy_proj
+                    and enemy.pos.distance_to(projectile.pos) < ENEMY_HIT_RADIUS
+                ):
+                    enemies.remove(enemy)
+                    projectiles.remove(projectile)
+            if projectile.enemy_proj and projectile.pos.distance_to(ship_pos) < 15:
+                await reset()
 
         # drawing screen
-        screen.fill((0, 0, 0))
+        screen.fill(BLACK)
         for asteroid in asteroids:
             asteroid.draw()
         for projectile in projectiles:
@@ -265,11 +356,17 @@ async def main():
             enemy.draw()
         pygame.draw.polygon(
             screen,
-            (255, 255, 255),
+            WHITE,
             [
-                ship_pos + pygame.math.Vector2(15, 0).rotate_rad(ship_rads),
-                ship_pos + pygame.math.Vector2(10, 0).rotate_rad(ship_rads + 2.5),
-                ship_pos + pygame.math.Vector2(10, 0).rotate_rad(ship_rads - 2.5),
+                ship_pos + pygame.math.Vector2(SHIP_NOSE_LENGTH, 0).rotate_rad(ship_rads),
+                ship_pos
+                + pygame.math.Vector2(SHIP_WING_LENGTH, 0).rotate_rad(
+                    ship_rads + SHIP_WING_ANGLE
+                ),
+                ship_pos
+                + pygame.math.Vector2(SHIP_WING_LENGTH, 0).rotate_rad(
+                    ship_rads - SHIP_WING_ANGLE
+                ),
             ],
         )
         pygame.display.flip()
