@@ -15,38 +15,52 @@ BLACK = (0, 0, 0)
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("asteroids")
 clock = pygame.time.Clock()
+font = pygame.font.Font(None, 36)
+
+
+def display_message(text, y_offset=0):
+    text_surface = font.render(text, True, WHITE)
+    text_rect = text_surface.get_rect(center=(WIDTH // 2, HEIGHT // 2 + y_offset))
+    screen.blit(text_surface, text_rect)
+
+
+async def yes_no_choice(message):
+    # Ensure event queue is clean before taking prompt input
+    pygame.event.clear()
+
+    choice = None
+    while choice is None:
+        pygame.event.pump()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_y:
+                    choice = True
+                elif event.key == pygame.K_n:
+                    choice = False
+
+        screen.fill(BLACK)
+        display_message(message + " (Y/N)")
+        pygame.display.flip()
+
+        clock.tick(60)
+        await asyncio.sleep(0)
+
+    return choice
 
 
 async def main():
-    font = pygame.font.Font(None, 36)
-
-    def display_message(text, y_offset=0):
-        text_surface = font.render(text, True, WHITE)
-        text_rect = text_surface.get_rect(center=(WIDTH // 2, HEIGHT // 2 + y_offset))
-        screen.blit(text_surface, text_rect)
-
-    async def yes_no_choice(message):
-        choice = None
-        while choice is None:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    pygame.quit()
-                    exit()
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_y:
-                        choice = True
-                    elif event.key == pygame.K_n:
-                        choice = False
-
-            screen.fill(BLACK)
-            display_message(message + " (Y/N)")
-            pygame.display.flip()
-            clock.tick(30)
-            await asyncio.sleep(0)
-        return choice
+    pygame.event.set_grab(True)
+    pygame.event.set_grab(False)
 
     mouse_aim = await yes_no_choice("Do you want to use mouse aiming?")
-    auto_aim = not mouse_aim and await yes_no_choice("Do you want to use auto aiming?")
+
+    if not mouse_aim:
+        auto_aim = await yes_no_choice("Do you want to use auto aiming?")
+    else:
+        auto_aim = False
 
     center = pygame.math.Vector2(WIDTH / 2, HEIGHT / 2)
 
@@ -95,7 +109,7 @@ async def main():
     enemies = []
 
     class Enemy:
-        def __init__(self, pos: pygame.math.Vector2, angle_rads: float) -> Enemy:
+        def __init__(self, pos: pygame.math.Vector2, angle_rads: float):
             self.pos = pos
             self.vel = pygame.math.Vector2(0, 0)
             self.angle_rads = angle_rads
@@ -103,6 +117,7 @@ async def main():
             self.lost_player = False
             self.omega = random.choice([-ENEMY_TURN_RATE, ENEMY_TURN_RATE])
             self.attack_start = 0
+            self.last_shot = 0
             enemies.append(self)
 
         def move(self):
@@ -292,10 +307,12 @@ async def main():
                     projections.append(asteroid_projection)
                 for enemy in enemies:
                     projections.append(enemy.pos)
-                aim_vec = (
-                    min(projections, key=lambda p: (p - ship_pos).length()) - ship_pos
-                )
-                Projectile(math.radians(aim_vec.as_polar()[1]), ship_pos, ship_vel)
+                if projections:
+                    aim_vec = (
+                        min(projections, key=lambda p: (p - ship_pos).length())
+                        - ship_pos
+                    )
+                    Projectile(math.radians(aim_vec.as_polar()[1]), ship_pos, ship_vel)
             else:
                 Projectile(ship_rads, ship_pos, ship_vel)
             last_action_time = current_time
@@ -315,7 +332,10 @@ async def main():
                         random.random() * math.pi * 2,
                     )
                 else:
-                    Enemy(enemy_locs[i], math.radians((pos - center).as_polar()[1]))
+                    Enemy(
+                        enemy_locs[i],
+                        math.radians((enemy_locs[i] - center).as_polar()[1]),
+                    )
             spawns += 1
 
         ship_pos += ship_vel
