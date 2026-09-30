@@ -18,15 +18,13 @@ clock = pygame.time.Clock()
 
 
 async def main():
-    font = pygame.font.Font(None, 36)  # Default font with size 36
+    font = pygame.font.Font(None, 36)
 
-    # Function to display a message on the screen
     def display_message(text, y_offset=0):
         text_surface = font.render(text, True, WHITE)
         text_rect = text_surface.get_rect(center=(WIDTH // 2, HEIGHT // 2 + y_offset))
         screen.blit(text_surface, text_rect)
 
-    # Wait for user input on the screen
     async def yes_no_choice(message):
         choice = None
         while choice is None:
@@ -211,7 +209,9 @@ async def main():
         spawns = INITIAL_ASTEROID_SPAWNS
         for _ in range(spawns):
             Asteroid(
-                ASTEROID_SPAWN_RADIUS, random.randint(0, WIDTH), random.randint(0, HEIGHT)
+                ASTEROID_SPAWN_RADIUS,
+                random.randint(0, WIDTH),
+                random.randint(0, HEIGHT),
             )
         enemy_locs = [
             pygame.math.Vector2(ENEMY_SPAWN_OFFSET, ENEMY_SPAWN_OFFSET),
@@ -264,11 +264,11 @@ async def main():
         keys = pygame.key.get_pressed()
         current_time = pygame.time.get_ticks()
 
-        if keys[pygame.K_LEFT]:
+        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
             ship_rads -= SHIP_TURN_SPEED
-        if keys[pygame.K_RIGHT]:
+        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
             ship_rads += SHIP_TURN_SPEED
-        if keys[pygame.K_UP]:
+        if keys[pygame.K_UP] or keys[pygame.K_w]:
             ship_vel += (
                 pygame.math.Vector2(math.cos(ship_rads), math.sin(ship_rads)) * 0.3
             )
@@ -358,7 +358,8 @@ async def main():
             screen,
             WHITE,
             [
-                ship_pos + pygame.math.Vector2(SHIP_NOSE_LENGTH, 0).rotate_rad(ship_rads),
+                ship_pos
+                + pygame.math.Vector2(SHIP_NOSE_LENGTH, 0).rotate_rad(ship_rads),
                 ship_pos
                 + pygame.math.Vector2(SHIP_WING_LENGTH, 0).rotate_rad(
                     ship_rads + SHIP_WING_ANGLE
